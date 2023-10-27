@@ -8,10 +8,14 @@ import {
   TypeRegistry,
 } from './global-id';
 
-class OrganizationLegacyIdentifierParserV1 implements IParser {
-  parse(value: any): string {
-    // Assuming 'value' is already the decoded part of the organization's data
-    // Serialize the value part to a JSON string
+class OrganizationLegacyIdentifierParserV1
+  implements IParser<{ id: string; systemId: string }>
+{
+  parse(value: string): { id: string; systemId: string } {
+    return JSON.parse(value);
+  }
+
+  format(value: { id: string; systemId: string }): string {
     return JSON.stringify(value);
   }
 }
@@ -25,7 +29,7 @@ describe('GlobalId Encoding and Decoding', () => {
   beforeEach(() => {
     typeRegistry = new TypeRegistry();
     parserRegistry = new ParserRegistry(typeRegistry);
-    encoder = new Encoder(typeRegistry);
+    encoder = new Encoder(parserRegistry, typeRegistry);
     decoder = new Decoder(parserRegistry, typeRegistry);
 
     typeRegistry.registerType('Organization', 'org');
@@ -52,12 +56,13 @@ describe('GlobalId Encoding and Decoding', () => {
     });
     const encoded = encoder.encode(globalId);
     const decoded = decoder.decode(encoded);
-    expect(decoded.type).toBe('Organization');
-    expect(decoded.version).toBe('1.0.0');
+    expect(decoded.getType()).toBe('Organization');
+    expect(decoded.getVersion()).toBe('1.0.0');
 
     const parser = new OrganizationLegacyIdentifierParserV1();
-    const parsedValue = parser.parse({ id: 'uuid', systemId: '123' });
-    expect(decoded.value).toEqual(parsedValue);
+    const formattedValue = parser.format({ id: 'uuid', systemId: '123' });
+    const parsedValue = parser.parse(formattedValue);
+    expect(decoded.getValue()).toEqual(parsedValue);
   });
 
   test('should throw when registering a parser for an unregistered type', () => {
@@ -113,9 +118,9 @@ describe('GlobalId Encoding and Decoding', () => {
     const globalId = new GlobalId('Organization', '1.0.0', complexData);
     const encoded = encoder.encode(globalId);
     const decoded = decoder.decode(encoded);
-    expect(decoded.type).toBe('Organization');
-    expect(decoded.version).toBe('1.0.0');
-    expect(decoded.value).toEqual(JSON.stringify(complexData));
+    expect(decoded.getType()).toBe('Organization');
+    expect(decoded.getVersion()).toBe('1.0.0');
+    expect(decoded.getValue()).toEqual(complexData);
   });
 
   test('should throw if encodedId is malformed', () => {
@@ -126,24 +131,24 @@ describe('GlobalId Encoding and Decoding', () => {
   });
 
   test('should throw if encodedId version does not match any registered parser', () => {
-    const globalId = new GlobalId('Organization', '99.99.99', {
-      id: 'uuid',
-      systemId: '123',
-    });
-    const encoded = encoder.encode(globalId);
     expect(() => {
+      const globalId = new GlobalId('Organization', '99.99.99', {
+        id: 'uuid',
+        systemId: '123',
+      });
+      const encoded = encoder.encode(globalId);
       decoder.decode(encoded);
     }).toThrow();
   });
 
   test('should throw if encodedId is corrupted after encoding', () => {
-    const globalId = new GlobalId('Organization', '1.0.0', {
-      id: 'uuid',
-      systemId: '123',
-    });
-    const encoded = encoder.encode(globalId);
-    const corruptedEncodedId = encoded.replace('org_', 'org_corrupted_'); // Corrupt the encoded ID
     expect(() => {
+      const globalId = new GlobalId('Organization', '1.0.0', {
+        id: 'uuid',
+        systemId: '123',
+      });
+      const encoded = encoder.encode(globalId);
+      const corruptedEncodedId = encoded.replace('org_', 'org_corrupted_'); // Corrupt the encoded ID
       decoder.decode(corruptedEncodedId);
     }).toThrow();
   });
@@ -179,7 +184,7 @@ describe('GlobalId Encoding and Decoding', () => {
     const globalId = new GlobalId('Organization', '1.0.0', specialCharData);
     const encoded = encoder.encode(globalId);
     const decoded = decoder.decode(encoded);
-    expect(decoded.value).toEqual(JSON.stringify(specialCharData));
+    expect(decoded.getValue()).toEqual(specialCharData);
   });
 
   test('should handle concurrent encoding and decoding', async () => {

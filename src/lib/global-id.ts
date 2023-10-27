@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { encode as cborEncode, decode as cborDecode } from 'cbor-x';
-import { brotliCompressSync, brotliDecompressSync } from 'zlib';
 
 export default class GlobalId<T> {
   private readonly value: T;
@@ -27,16 +26,27 @@ export default class GlobalId<T> {
   }
 }
 
-export interface IParser {
-  parse(value: any): string;
+export interface IParser<T = any> {
+  parse(value: string): T;
+  format(value: T): string;
+}
+
+export class StringParser implements IParser<string> {
+  parse(value: string): string {
+    return value;
+  }
+
+  format(value: string): string {
+    return value;
+  }
 }
 
 export class ParserRegistry {
   private parsers: Record<string, Map<string, IParser>> = {};
 
-  constructor(private typeRegistry: TypeRegistry) {}
+  constructor(private typeRegistry: TypeRegistry) { }
 
-  registerParser(type: string, version: string, parser: IParser): void {
+  registerParser<T>(type: string, version: string, parser: IParser<T>): void {
     if (!this.typeRegistry.getType(type)) {
       throw new Error(`Type "${type}" is not registered in the TypeRegistry.`);
     }
@@ -46,7 +56,7 @@ export class ParserRegistry {
     this.parsers[type].set(version, parser);
   }
 
-  getParser(type: string, version: string): IParser {
+  getParser<T>(type: string, version: string): IParser<T> {
     const versionedParsers = this.parsers[type];
     if (!versionedParsers) {
       throw new Error(`No parsers registered for type "${type}".`);
@@ -83,7 +93,10 @@ export class TypeRegistry {
 }
 
 export class Encoder {
-  constructor(private typeRegistry: TypeRegistry) {}
+  constructor(
+    private parserRegistry: ParserRegistry,
+    private typeRegistry: TypeRegistry
+  ) { }
 
   encode<T>(id: GlobalId<T>): string {
     const typePrefix = this.typeRegistry.getPrefix(id.getType());
@@ -95,25 +108,23 @@ export class Encoder {
       throw new Error(`Value is not defined.`);
     }
 
-    // Ensure that valueWithVersion is serialized to a Buffer
-    const valueWithVersion = {
-      value: id.getValue(),
-      _version: id.getVersion(),
-    };
-    const cborData = cborEncode(valueWithVersion);
+    const parser = this.parserRegistry.getParser<T>(
+      typePrefix,
+      id.getVersion()
+    );
+    const formattedValue = parser.format(id.getValue());
 
-    // Compress the CBOR data
-    const compressedValue = brotliCompressSync(cborData);
+    const payload = [formattedValue, id.getVersion()];
 
-    // Convert the compressed value to a base64 string
-    const base64EncodedValue = compressedValue.toString('base64');
+    const compressedPayload = cborEncode(payload);
+    const base64EncodedPayload = toBase64(compressedPayload);
 
-    const sanitizedBase64EncodedValue = base64EncodedValue
+    const sanitizedBase64EncodedPayload = base64EncodedPayload
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=+$/, '');
 
-    return `${typePrefix}_${sanitizedBase64EncodedValue}`;
+    return `${typePrefix}_${sanitizedBase64EncodedPayload}`;
   }
 }
 
@@ -121,7 +132,7 @@ export class Decoder {
   constructor(
     private parserRegistry: ParserRegistry,
     private typeRegistry: TypeRegistry
-  ) {}
+  ) { }
 
   private splitByFirstOccurrence = (
     input: string,
@@ -136,31 +147,30 @@ export class Decoder {
     return [part1, part2];
   };
 
-  decode(encodedId: string): { type: string; version: string; value: string } {
-    const [typePrefix, encodedValue] = this.splitByFirstOccurrence(
+  decode<T>(encodedId: string): GlobalId<T> {
+    const [typePrefix, encodedPayload] = this.splitByFirstOccurrence(
       encodedId,
       '_'
     );
 
-    let paddedEncodedValue = encodedValue.replace(/-/g, '+').replace(/_/g, '/');
+    let paddedEncodedPayload = encodedPayload
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
 
     // Pad the string with '=' to make the length a multiple of 4
-    while (paddedEncodedValue.length % 4) {
-      paddedEncodedValue += '=';
+    while (paddedEncodedPayload.length % 4) {
+      paddedEncodedPayload += '=';
     }
 
     // Decompress and decode the value to get the version and the actual value
-    const encodedValueBuffer = Buffer.from(paddedEncodedValue, 'base64');
-    const decompressedData = brotliDecompressSync(encodedValueBuffer);
-    const decodedData = cborDecode(decompressedData) as any;
-    const version = decodedData._version;
-    const value = decodedData.value;
+    const encodedPayloadBuffer = Buffer.from(paddedEncodedPayload, 'base64');
+    const [data, version] = cborDecode(encodedPayloadBuffer) as Array<any>;
 
     // Retrieve the correct parser based on the type prefix and version
     const parser = this.parserRegistry.getParser(typePrefix, version);
 
     // Parse the value part of the data using the parser
-    const parsedValue = parser.parse(value);
+    const parsedValue = parser.parse(data) as T;
 
     const parsedType = this.typeRegistry.getType(typePrefix);
     if (!parsedType) {
@@ -170,10 +180,31 @@ export class Decoder {
     }
 
     // Return the type, version, and parsed value
-    return {
-      type: parsedType,
-      version,
-      value: parsedValue,
-    };
+    return new GlobalId<T>(parsedType, version, parsedValue);
   }
+}
+
+function toBase64(buffer: Buffer | Uint8Array): string {
+  if (isNodeBuffer(buffer)) {
+    // Node.js environment
+    return buffer.toString('base64');
+  } else if (buffer instanceof Uint8Array) {
+    // Browser environment
+    return uint8ArrayToBase64(buffer);
+  } else {
+    throw new Error('Unsupported input type for base64 conversion');
+  }
+}
+
+function isNodeBuffer(buffer: any): buffer is Buffer {
+  return typeof Buffer !== 'undefined' && Buffer.isBuffer(buffer);
+}
+
+function uint8ArrayToBase64(buffer: Uint8Array): string {
+  let binary = '';
+  const len = buffer.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(buffer[i]);
+  }
+  return window.btoa(binary);
 }

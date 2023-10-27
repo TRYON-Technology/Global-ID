@@ -5,26 +5,36 @@
   "projectType": "library",
   "targets": {
     "build": {
-      "executor": "@nx/js:swc",
-      "outputs": ["{options.outputPath}"],
+      "executor": "@nx/js:tsc",
+      "outputs": [
+        "{options.outputPath}"
+      ],
       "options": {
         "outputPath": "dist/libs/global-id",
         "main": "libs/global-id/src/index.ts",
         "tsConfig": "libs/global-id/tsconfig.lib.json",
-        "assets": ["libs/global-id/*.md"]
+        "assets": [
+          "libs/global-id/*.md"
+        ]
       }
     },
     "publish": {
       "command": "node tools/scripts/publish.mjs global-id {args.ver} {args.tag}",
-      "dependsOn": ["build"]
+      "dependsOn": [
+        "build"
+      ]
     },
     "lint": {
       "executor": "@nx/eslint:lint",
-      "outputs": ["{options.outputFile}"]
+      "outputs": [
+        "{options.outputFile}"
+      ]
     },
     "test": {
       "executor": "@nx/jest:jest",
-      "outputs": ["{workspaceRoot}/coverage/{projectRoot}"],
+      "outputs": [
+        "{workspaceRoot}/coverage/{projectRoot}"
+      ],
       "options": {
         "jestConfig": "libs/global-id/jest.config.ts"
       }

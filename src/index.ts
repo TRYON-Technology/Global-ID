@@ -5,4 +5,5 @@ export {
   IParser,
   ParserRegistry,
   TypeRegistry,
+  StringParser,
 } from './lib/global-id';
